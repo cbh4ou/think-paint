@@ -1,0 +1,34 @@
+name: watercolor
+medium: "loose botanical watercolor painting"
+canvas: [800, 1000]
+style_hint: >
+  Soft wet-on-wet watercolor on warm paper: luminous translucent washes,
+  pigment bleed at edges, layered glazes, confident minimal strokes.
+  Paint each petal two or three times — a big pale pass first, then a
+  smaller, more opaque one inside it.
+
+# The article's 10-method watercolor allowlist (p5.brush 1.1.4)
+allowed:
+  - fill
+  - bleed
+  - polygon
+  - circle
+  - pick
+  - stroke
+  - strokeWeight
+  - line
+  - flowLine
+  - spline
+
+banned: ["text(", "image(", "loadImage(", "drawingContext", "ellipse(", "triangle(", "quad(", "arc(", "hatch("]
+
+gate:
+  min_coverage: 0.08
+
+judge:
+  question: >-
+    Which of these two images is the better loose botanical watercolor painting?
+    Judge by: soft translucent layered washes, natural pigment bleed and
+    edge-darkening, confident composition filling the page, believable
+    botanical form (not clip-art geometry), no text or hard vector edges.
+  refs_per_candidate: 4

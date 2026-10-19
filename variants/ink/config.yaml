@@ -1,0 +1,33 @@
+name: ink
+medium: "architectural ink pen sketch with cross-hatching"
+canvas: [800, 1000]
+style_hint: >
+  Confident ink line work with directional cross-hatching for shading depth,
+  minimal or no fill, construction lines left visible, strong perspective.
+
+# Medium swap: pen/hatch surface instead of watercolor bleed
+allowed:
+  - pick
+  - set
+  - stroke
+  - strokeWeight
+  - noFill
+  - hatch
+  - noHatch
+  - setHatch
+  - line
+  - flowLine
+  - spline
+
+banned: ["text(", "image(", "loadImage(", "drawingContext", "ellipse(", "triangle(", "bleed(", "fillTexture(", "fill("]
+
+gate:
+  min_coverage: 0.04
+
+judge:
+  question: >-
+    Which of these two images is the better architectural ink sketch with
+    cross-hatching? Judge by: expressive confident line weight variation,
+    hatching that builds believable shading depth and volume, well-proportioned
+    perspective, no text or filled silhouettes.
+  refs_per_candidate: 3

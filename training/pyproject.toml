@@ -1,0 +1,18 @@
+[project]
+name = "think-paint-training"
+version = "0.1.0"
+description = "Level-3 GRPO trainer for think-paint (QLoRA on an RTX 4060 8GB)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch>=2.6",
+    "transformers>=4.53",
+    "trl>=0.20",
+    "peft>=0.15",
+    "bitsandbytes>=0.45",
+    "accelerate>=1.7",
+    "datasets>=3.0",
+    # thinkpaint runtime deps (reward fn imports the package from the parent repo)
+    "pyyaml>=6",
+    "pillow>=11",
+    "playwright>=1.64",
+]

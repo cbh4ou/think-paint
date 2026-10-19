@@ -1,0 +1,6 @@
+__pycache__/
+.venv/
+runs/
+gallery/**/*.html
+.pytest_cache/
+adapters/

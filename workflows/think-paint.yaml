@@ -1,0 +1,215 @@
+workflow:
+  name: think-paint
+  description: >-
+    Agentic painting loop: an LLM writes p5.brush JavaScript, a headless
+    browser renders it, an anti-cheat gate filters reward hacking, a vision
+    model critiques the canvas and drives rewrites, and the final painting is
+    pairwise-judged against the variant's golden pool with optional human
+    curation of new pool entries.
+  entry_point: init
+  limits:
+    max_iterations: 24
+    timeout_seconds: 1800
+  input:
+    prompt:
+      description: What to paint, e.g. "a crimson poppy bending in the wind"
+      required: true
+      type: string
+    rounds:
+      default: 3
+      description: Self-critique rounds
+      required: false
+      type: number
+    variant:
+      default: watercolor
+      description: Variant directory name under variants/ (watercolor, ink, ...)
+      required: false
+      type: string
+  version: 1.0.0
+agents:
+- name: init
+  description: Fresh run directory and empty feedback file.
+  type: script
+  command: bash
+  args:
+  - -c
+  - >-
+    mkdir -p runs/current &&
+    rm -f runs/current/sketch.js runs/current/round.png runs/current/render.json
+    runs/current/feedback.txt runs/current/rounds.log &&
+    touch runs/current/feedback.txt &&
+    printf '{"run_dir": "runs/current"}'
+  routes:
+  - to: generate
+- name: generate
+  description: LLM writes a p5.brush sketch from the prompt (+ prior feedback).
+  type: script
+  timeout: 300
+  command: uv
+  args:
+  - run
+  - python
+  - -m
+  - thinkpaint.paint
+  - generate
+  - --variant
+  - variants/{{ workflow.input.variant }}/config.yaml
+  - --prompt
+  - "{{ workflow.input.prompt }}"
+  - --feedback-file
+  - runs/current/feedback.txt
+  - --out
+  - runs/current/sketch.js
+  env:
+    THINKPAINT_API_KEY: "${THINKPAINT_API_KEY}"
+    THINKPAINT_BASE_URL: "${THINKPAINT_BASE_URL:-https://api.z.ai/api/paas/v4}"
+    THINKPAINT_MODEL: "${THINKPAINT_MODEL:-glm-5.3-flash}"
+  routes:
+  - to: render
+- name: render
+  description: Headless Chromium renders the sketch to runs/current/round.png.
+  type: script
+  timeout: 120
+  command: uv
+  args:
+  - run
+  - python
+  - -m
+  - thinkpaint.paint
+  - render
+  - --sketch
+  - runs/current/sketch.js
+  - --out
+  - runs/current/round.png
+  - --json-out
+  - runs/current/render.json
+  routes:
+  - to: gate
+- name: gate
+  description: >-
+    Anti-cheat gate: syntax, brush-API allowlist, banned tokens, pixel
+    coverage. Writes repair feedback on failure (exit 3).
+  type: script
+  timeout: 120
+  command: uv
+  args:
+  - run
+  - python
+  - -m
+  - thinkpaint.paint
+  - gate
+  - --variant
+  - variants/{{ workflow.input.variant }}/config.yaml
+  - --sketch
+  - runs/current/sketch.js
+  - --png
+  - runs/current/round.png
+  - --render-json
+  - runs/current/render.json
+  - --feedback-out
+  - runs/current/feedback.txt
+  routes:
+  - to: critique
+    when: "exit_code == 0"
+  - to: generate
+- name: critique
+  description: Vision model sees the painting and rewrites the sketch (feedback 
+    file).
+  type: script
+  timeout: 300
+  command: uv
+  args:
+  - run
+  - python
+  - -m
+  - thinkpaint.paint
+  - critique
+  - --variant
+  - variants/{{ workflow.input.variant }}/config.yaml
+  - --prompt
+  - "{{ workflow.input.prompt }}"
+  - --png
+  - runs/current/round.png
+  - --out
+  - runs/current/feedback.txt
+  env:
+    THINKPAINT_API_KEY: "${THINKPAINT_API_KEY}"
+    THINKPAINT_BASE_URL: "${THINKPAINT_BASE_URL:-https://api.z.ai/api/paas/v4}"
+    THINKPAINT_MODEL: "${THINKPAINT_MODEL:-glm-5.3-flash}"
+  routes:
+  - to: round_check
+- name: round_check
+  description: Count completed critique rounds; decide loop vs judge.
+  type: script
+  timeout: 60
+  command: uv
+  args:
+  - run
+  - python
+  - -m
+  - thinkpaint.paint
+  - status
+  - --dir
+  - runs/current
+  - --rounds
+  - "{{ workflow.input.rounds }}"
+  routes:
+  - to: judge
+    when: "done"
+  - to: generate
+- name: judge
+  description: Pairwise win-rate of the final painting vs the golden pool.
+  type: script
+  timeout: 300
+  command: uv
+  args:
+  - run
+  - python
+  - -m
+  - thinkpaint.paint
+  - judge
+  - --variant
+  - variants/{{ workflow.input.variant }}/config.yaml
+  - --png
+  - runs/current/round.png
+  env:
+    THINKPAINT_API_KEY: "${THINKPAINT_API_KEY}"
+    THINKPAINT_BASE_URL: "${THINKPAINT_BASE_URL:-https://api.z.ai/api/paas/v4}"
+    THINKPAINT_MODEL: "${THINKPAINT_MODEL:-glm-5.3-flash}"
+  routes:
+  - to: curate
+- name: curate
+  description: Optional Level-2 step — grow the golden pool from runs you love.
+  type: human_gate
+  prompt: |
+    Painting finished for: {{ workflow.input.prompt }}
+
+    Canvas: runs/current/round.png
+    Editable code: runs/current/sketch.js
+    {% if judge is defined and judge.output %}Pairwise reward vs golden pool:
+    {{ judge.output | tojson }}{% endif %}
+
+    Open the PNG. Keep it in the {{ workflow.input.variant }} golden pool?
+  options:
+  - label: "Love — add to golden pool"
+    route: pool_add
+    value: love
+  - label: "Skip"
+    route: $end
+    value: skip
+- name: pool_add
+  description: Copy the painting into the variant's golden pool.
+  type: script
+  command: bash
+  args:
+  - -c
+  - >-
+    mkdir -p variants/{{ workflow.input.variant }}/golden_pool &&
+    cp runs/current/round.png
+    "variants/{{ workflow.input.variant }}/golden_pool/love_$(date +%s).png" &&
+    ls variants/{{ workflow.input.variant }}/golden_pool | wc -l
+  routes:
+  - to: $end
+output:
+  code: "runs/current/sketch.js"
+  painting: "runs/current/round.png"

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>think-paint harness</title>
+<script src="__P5_URL__"></script>
+<script src="__BRUSH_URL__"></script>
+<style>html,body{margin:0;padding:0;background:#fff}</style>
+</head>
+<body>
+<script>
+// Runner: surfaces errors, detects painting completion (pixel stability).
+window.__errors = [];
+window.__done = false;
+window.addEventListener("error", (e) => { window.__errors.push(String(e.message || e)); });
+if (window.console) {
+  const orig = console.error;
+  console.error = (...a) => { window.__errors.push(a.map(String).join(" ")); orig(...a); };
+}
+</script>
+<script>
+__SKETCH_JS__
+</script>
+<script>
+// Completion probe: sample the canvas; 5 consecutive identical samples => done.
+(function () {
+  let stable = 0, last = null;
+  const started = performance.now();
+  function tick() {
+    const cv = document.querySelector("canvas");
+    if (cv && cv.width > 0) {
+      let h = "";
+      try {
+        // downsampled fingerprint: 16x20 grid of pixels
+        const c2 = document.createElement("canvas");
+        c2.width = 16; c2.height = 20;
+        c2.getContext("2d").drawImage(cv, 0, 0, 16, 20);
+        h = c2.toDataURL().slice(-400);
+      } catch (e) { h = "err" + window.__errors.length; }
+      if (h === last) { stable++; } else { stable = 0; last = h; }
+      if (stable >= 5 || performance.now() - started > 15000) { window.__done = true; return; }
+    }
+    if (performance.now() - started > 15000) { window.__done = true; return; }
+    setTimeout(tick, 120);
+  }
+  setTimeout(tick, 300);
+})();
+</script>
+</body>
+</html>
