@@ -1,0 +1,30 @@
+# Which model families paint this variant's pool. Each entry references a
+# profile from providers.toml — no endpoints or keys here.
+# The [eye] is the shared critic/judge (must accept images).
+
+[[generator]]
+tag = "glm-flash"
+provider = "zai"
+model = "glm-5.3-flash"
+
+[[generator]]
+tag = "glm-flagship"
+provider = "zai"
+model = "glm-5.3"
+
+# Add any profile you have — examples:
+# [[generator]]
+# tag = "qwen"
+# provider = "openrouter"
+# model = "qwen/qwen3-coder-next"
+#
+# [[generator]]
+# tag = "local"
+# provider = "ollama"
+# model = "qwen2.5-coder:3b"
+
+[eye]
+provider = "zai"
+model = "glm-5.3-flash"
+# provider = "openrouter"      # e.g. gemma-4-31b-it sees images
+# model = "google/gemma-4-31b-it"

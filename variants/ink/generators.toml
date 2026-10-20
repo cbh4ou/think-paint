@@ -1,0 +1,15 @@
+# Which model families paint this variant's pool (ink sketching).
+
+[[generator]]
+tag = "glm-flash"
+provider = "zai"
+model = "glm-5.3-flash"
+
+[[generator]]
+tag = "glm-flagship"
+provider = "zai"
+model = "glm-5.3"
+
+[eye]
+provider = "zai"
+model = "glm-5.3-flash"
