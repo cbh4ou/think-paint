@@ -21,6 +21,7 @@ playwright; budget ~7s per completion — it dominates step time
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import torch
 from datasets import Dataset
@@ -76,7 +77,7 @@ def main() -> None:
     ap.add_argument("--max-steps", type=int, default=200)
     ap.add_argument("--num-generations", type=int, default=4)
     ap.add_argument("--learning-rate", type=float, default=5e-5)
-    ap.add_argument("--max-completion-length", type=int, default=1536)
+    ap.add_argument("--max-completion-length", type=int, default=1024)
     ap.add_argument("--save-steps", type=int, default=50)
     args = ap.parse_args()
 
@@ -91,8 +92,10 @@ def main() -> None:
         output_dir=str(out),
         max_steps=args.max_steps,
         num_generations=args.num_generations,
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=2,
+        per_device_train_batch_size=1,       # 8GB: activations OOM at batch 2
+        gradient_accumulation_steps=4,       # same effective group of 4
+        gradient_checkpointing=True,         # 8GB/WSL: rebuild activations vs store
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         max_completion_length=args.max_completion_length,
         temperature=1.0,
         learning_rate=args.learning_rate,

@@ -30,6 +30,8 @@ def main() -> None:
     ap.add_argument("--base-model", default="Qwen/Qwen2.5-Coder-3B-Instruct")
     ap.add_argument("--prompt", required=True)
     ap.add_argument("--out", type=Path, default=Path("runs/adapter.js"))
+    ap.add_argument("--png", type=Path, default=None,
+                    help="also render + gate to this png")
     ap.add_argument("--max-new-tokens", type=int, default=1536)
     a = ap.parse_args()
 
@@ -38,7 +40,8 @@ def main() -> None:
     model = AutoModelForCausalLM.from_pretrained(
         a.base_model, dtype=torch.bfloat16, device_map="auto"
     )
-    model = PeftModel.from_pretrained(model, a.adapter)
+    if str(a.adapter) not in ("none", "-"):
+        model = PeftModel.from_pretrained(model, a.adapter)
     model.eval()
 
     messages = [
@@ -56,8 +59,22 @@ def main() -> None:
     )
     completion = tok.decode(out[0][ids.shape[1]:], skip_special_tokens=True)
     a.out.parent.mkdir(parents=True, exist_ok=True)
-    a.out.write_text(extract_js(completion))
-    print(f"sketch written: {a.out} ({a.out.stat().st_size} chars)")
+    code = extract_js(completion)
+    a.out.write_text(code)
+    print(f"sketch written: {a.out} ({len(code)} chars)")
+    if a.png:
+        from thinkpaint import gate as gate_mod
+        from thinkpaint import render as render_mod
+        from thinkpaint.config import load_variant as lv
+
+        v = lv(a.variant)
+        r = render_mod.render_code(code, a.png)
+        print(f"render: {'ok' if r['ok'] else r['errors'][:2]} -> {a.png}")
+        if r["ok"]:
+            g = gate_mod.run_gate(code, a.png, {
+                "allowed": v.allowed, "banned": v.banned,
+                "min_coverage": v.min_coverage})
+            print(f"gate: {'PASS' if g['pass'] else g['reasons']}  coverage={g['coverage']}")
 
 
 if __name__ == "__main__":

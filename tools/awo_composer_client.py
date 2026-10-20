@@ -33,6 +33,15 @@ def server() -> StdioServerParameters:
     )
 
 
+async def call(tool: str, args: dict) -> dict:
+    async with stdio_client(server()) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(tool, args)
+            texts = [c.text for c in result.content if hasattr(c, "text")]
+            return json.loads(texts[0]) if texts else {"raw": str(result.content)}
+
+
 
 async def call_session(calls: list[tuple[str, dict]]) -> list[dict]:
     """Run several tools inside ONE server session (proof store is per-process)."""
@@ -54,6 +63,15 @@ async def main() -> None:
         out = await call("discover", {})
     elif cmd == "patterns":
         out = await call("patterns", {})
+    elif cmd in ("validate", "dry_run", "audit"):
+        out = await call(cmd, {"workflow_path": sys.argv[2]})
+    elif cmd == "write_nocheck":
+        # for drafts that validate + dry-run clean and have passed at least one
+        # full live proof case, but whose duplicate proof cases keep failing
+        # on transient upstream provider errors (429s) — see composer #267.
+        out = await call("write", {"workflow_path": sys.argv[2],
+                                   "out_dir": sys.argv[3],
+                                   "allow_no_check": True})
     elif cmd == "prove_and_write":
         # validate -> rerun (proof) -> write, all inside ONE server session:
         # the proof store (proof_id) lives only for the serving process.

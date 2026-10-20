@@ -1,0 +1,58 @@
+# One generator branch of the pool factory: run the think-paint agentic
+# batch loop with one provider profile (see providers.toml). The eye
+# (critique + judge) is also a profile — defaults to the generator's.
+#
+# Launched by pool-factory.yaml per generator; also runnable directly:
+#   ZAI_API_KEY=... awo run workflows/paint-branch.yaml \
+#     -i tag=glm-flagship -i provider=zai -i model=glm-5.3 -i limit=5
+workflow:
+  name: paint-branch
+  description: Agentic painting batch loop for one generator profile.
+  version: 1.1.0
+  entry_point: paint
+  limits:
+    max_iterations: 6
+    timeout_seconds: 14400
+  input:
+    variant: {type: string, required: false, default: watercolor}
+    limit: {type: number, required: false, default: 12}
+    tag: {type: string, required: true}
+    provider: {type: string, required: true}
+    model: {type: string, required: true}
+    eye_provider: {type: string, required: false, default: ""}
+    eye_model: {type: string, required: false, default: ""}
+
+agents:
+  - name: paint
+    type: script
+    description: >-
+      Generate pool candidates with this branch's provider profile;
+      resumable — finished prompt dirs are skipped on re-run.
+    command: bash
+    env:
+      # script steps see only declared env — pass profile key vars through
+      # (all optional: a user has only their own provider's key)
+      ZAI_API_KEY: "${ZAI_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      THINKPAINT_PROVIDERS: "${THINKPAINT_PROVIDERS:-}"
+    args:
+      - -c
+      - >-
+        export THINKPAINT_PROVIDER="{{ workflow.input.provider }}"
+        THINKPAINT_MODEL="{{ workflow.input.model }}";
+        [ -n "{{ workflow.input.eye_provider }}" ] &&
+        export THINKPAINT_VISION_PROVIDER="{{ workflow.input.eye_provider }}";
+        [ -n "{{ workflow.input.eye_model }}" ] &&
+        export THINKPAINT_VISION_MODEL="{{ workflow.input.eye_model }}";
+        uv run python -m thinkpaint.paint batch
+        --variant variants/{{ workflow.input.variant }}/config.yaml
+        --rounds 3 --limit {{ workflow.input.limit }}
+        --out-prefix gallery/{{ workflow.input.variant }}/{{ workflow.input.tag }}
+    timeout: 7200
+    routes:
+      - to: $end
+
+output:
+  candidates: "gallery/{{ workflow.input.variant }}/{{ workflow.input.tag }}/"

@@ -1,0 +1,88 @@
+# Multi-generator pool factory: run the think-paint agentic loop in parallel
+# across several model families, all feeding ONE variant pool. Generators are
+# code-writing text models; glm-5.3-flash on z.ai stays the shared eye
+# (critique + pairwise judge) for every branch.
+#
+# Launch (keys come from the environment, never from this file):
+#   export ZAI_API_KEY=... OPENROUTER_API_KEY=...
+#   awo run workflows/pool-factory.yaml -i limit=12 -i variant=watercolor
+#
+# ~limit prompts x 3 critique rounds per family. Paid OpenRouter generators
+# cost roughly $0.05-0.10 per prompt.
+workflow:
+  name: pool-factory
+  description: >-
+    Generate golden-pool candidates with several model families in parallel:
+    each branch runs the think-paint agentic loop (generate -> render -> gate
+    -> vision critique) with a different code-writing model, judged by the
+    shared glm-5.3-flash eye, then a shortlist ranks everything for human
+    stamping.
+  version: 1.0.0
+  entry_point: generators
+  limits:
+    max_iterations: 12
+    timeout_seconds: 14400
+  input:
+    variant:
+      type: string
+      required: false
+      default: watercolor
+      description: Variant directory name under variants/
+    limit:
+      type: number
+      required: false
+      default: 12
+      description: Prompts per generator branch (0 = all)
+
+agents:
+  - name: generators
+    type: script
+    description: Read the variant's generator list (variants/<v>/generators.toml).
+    command: uv
+    args:
+      - run
+      - python
+      - -c
+      - >-
+        import json, tomllib;
+        from pathlib import Path;
+        d = tomllib.loads(Path("variants/{{ workflow.input.variant }}/generators.toml").read_text());
+        print(json.dumps({"models": d["generator"], "eye": d.get("eye", {})}))
+    routes:
+      - to: paint_branches
+
+  - name: shortlist
+    type: script
+    description: Rank every candidate (contact sheet + list) for human stamping.
+    command: uv
+    args:
+      - run
+      - python
+      - tools/contact_sheet.py
+      - --prefix
+      - gallery
+    timeout: 300
+    routes:
+      - to: $end
+
+for_each:
+  - name: paint_branches
+    type: for_each
+    source: generators.output.models
+    as: g
+    max_concurrent: 4
+    agent:
+      name: paint_branch
+      type: workflow
+      workflow: paint-branch.yaml
+      input_mapping:
+        variant: "{{ workflow.input.variant }}"
+        limit: "{{ workflow.input.limit }}"
+        tag: "{{ g.tag }}"
+        provider: "{{ g.provider }}"
+        model: "{{ g.model }}"
+        eye_provider: "{{ generators.output.eye.provider }}"
+        eye_model: "{{ generators.output.eye.model }}"
+output:
+  gallery: "gallery/{{ workflow.input.variant }}/"
+  curate: "uv run python tools/curate.py  (stamp loves/okays per family)"

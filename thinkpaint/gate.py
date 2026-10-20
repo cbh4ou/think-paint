@@ -18,6 +18,8 @@ from pathlib import Path
 SAFE_GLOBALS = {
     "createCanvas", "background", "WEBGL", "frameRate", "noLoop", "redraw",
     "push", "pop", "translate", "rotate", "scale", "sin", "cos", "tan", "abs",
+    "map", "random", "randomSeed", "noise", "noiseSeed", "constrain", "lerp",
+    "color", "red", "green", "blue", "alpha",
     "min", "max", "dist", "floor", "ceil", "round", "print", "console",
     "radians", "degrees", "angleMode", "sq", "sqrt", "pow", "noiseDetail",
     "PI", "TWO_PI", "HALF_PI", "QUARTER_PI", "width", "height",

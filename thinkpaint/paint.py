@@ -25,7 +25,9 @@ from .llm import LLM
 REPO = Path(__file__).resolve().parent.parent
 
 
-def extract_js(text: str) -> str:
+def extract_js(text: str | None) -> str:
+    if not text:
+        return ""
     m = re.findall(r"```(?:javascript|js)?\s*\n(.*?)```", text, flags=re.S)
     return (m[-1] if m else text).strip()
 
@@ -47,18 +49,29 @@ def draw_references(pool: Path, n: int) -> list[str]:
 
 def score_png(llm: LLM, v: Variant, png: Path) -> dict:
     """Pairwise win-rate vs the pool: N references, each judged in BOTH
-    presentation orders (position-bias control). Score = wins / 2N."""
-    refs = draw_references(v.golden_pool, v.refs_per_candidate)
+    presentation orders (position-bias control). Score = wins / 2N.
+    Tolerates concurrent curation: vanished files just drop that comparison."""
+    if not png.exists():
+        return {"reward": None, "reason": "candidate missing"}
+    refs = [r for r in draw_references(v.golden_pool, v.refs_per_candidate)
+            if Path(r).exists()]
     if not refs:
         return {"reward": None, "reason": "golden pool empty"}
+    judge_llm = llm.vision()
     wins = 0
     for ref in refs:
         for a_first in (True, False):
             x, y = (str(png), ref) if a_first else (ref, str(png))
-            pick = llm.pairwise(v.judge_question, x, y)
+            try:
+                pick = judge_llm.pairwise(v.judge_question, x, y)
+            except FileNotFoundError:
+                continue  # file vanished mid-judging (human curating in parallel)
             wins += (pick == "A") == a_first
     return {"reward": round(wins / (2 * len(refs)), 3),
             "wins": wins, "refs": len(refs)}
+def cmd_judge(a: argparse.Namespace) -> None:
+    v = load_variant(a.variant)
+    print(json.dumps(score_png(LLM(), v, a.png)))
 
 
 def cmd_generate(a: argparse.Namespace) -> None:
@@ -116,14 +129,10 @@ def cmd_status(a: argparse.Namespace) -> None:
 
 def cmd_critique(a: argparse.Namespace) -> None:
     v = load_variant(a.variant)
-    text = LLM().critique(v.system_prompt(), a.prompt, str(a.png))
+    text = LLM().vision().critique(v.system_prompt(), a.prompt, str(a.png))
     a.out.write_text(text)
     print(json.dumps({"feedback_file": str(a.out), "chars": len(text)}))
 
-
-def cmd_judge(a: argparse.Namespace) -> None:
-    v = load_variant(a.variant)
-    print(json.dumps(score_png(LLM(), v, a.png)))
 
 def cmd_batch(a: argparse.Namespace) -> None:
     """Pool generation: run the full loop over every prompt in prompts.jsonl.
@@ -131,7 +140,9 @@ def cmd_batch(a: argparse.Namespace) -> None:
     gallery/<variant>/ so variants never collide."""
     v = load_variant(a.variant)
     prefix = a.out_prefix or Path("gallery") / v.name
-    for i, p in enumerate(v.prompts, 1):
+    prompts = v.prompts[: a.limit] if a.limit else v.prompts
+    total = len(prompts)
+    for i, p in enumerate(prompts, 1):
         out = prefix / f"{i:03d}"
         if (out / "score.json").exists():
             print(f"[{i}/{total}] skip {out} (done)")
@@ -181,6 +192,75 @@ def cmd_stamp(a: argparse.Namespace) -> None:
     print(f"stamped {dst}  (pool now {n} paintings)")
 
 
+def cmd_doctor(a: argparse.Namespace) -> None:
+    """Readiness check for non-coders: everything needed to paint, train,
+    and judge — with a plain-language fix for each failure."""
+    import os as _os
+    import shutil as _sh
+    import tomllib as _toml
+
+    def check(label: str, ok: bool, fix: str) -> None:
+        print(f"{'PASS' if ok else 'FAIL':4s}  {label}" + ("" if ok else f"\n      fix: {fix}"))
+
+    check("node (syntax gate)", _sh.which("node") is not None,
+          "install Node.js (https://nodejs.org)")
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            p.chromium.launch(headless=True).close()
+        check("headless chromium (renderer)", True, "")
+    except Exception:
+        check("headless chromium (renderer)", False,
+              "uv run playwright install chromium")
+
+    providers_path = Path(_os.environ.get("THINKPAINT_PROVIDERS")
+                          or REPO / "providers.toml")
+    try:
+        profiles = _toml.loads(providers_path.read_text())
+        check(f"providers.toml ({len(profiles)} profiles: {', '.join(sorted(profiles))})",
+              True, "")
+    except Exception as e:
+        check("providers.toml", False, f"fix {providers_path}: {e}")
+        profiles = {}
+
+    for name in sorted(profiles):
+        p = profiles[name]
+        key = p.get("key") or _os.environ.get(p.get("key_env", ""), "")
+        check(f"profile [{name}] key ({p.get('key_env', 'inline')})",
+              bool(key), f"export ${p.get('key_env', '?')} or add key = \"...\" in {providers_path}")
+
+    for vdir in sorted((REPO / "variants").glob("*/config.yaml")):
+        v = load_variant(vdir)
+        pool = len(list(v.golden_pool.glob("*.png")))
+        gens = vdir.parent / "generators.toml"
+        gcount = len(_toml.loads(gens.read_text()).get("generator", [])) if gens.exists() else 0
+        check(f"variant {v.name}: {len(v.prompts)} prompts, {gcount} generators, {pool} pool images",
+              pool >= 3, "stamp more loves with tools/curate.py (need >= 3 to judge)")
+
+    if a.ping and profiles:
+        from thinkpaint.llm import _load_profile
+
+        import urllib.request as _u
+
+        for name in sorted(profiles):
+            if name != a.ping and a.ping != "all":
+                continue
+            try:
+                p = _load_profile(name)
+                body = json.dumps({"model": p.get("model"),
+                                   "messages": [{"role": "user", "content": "Reply: OK"}],
+                                   "max_tokens": 512}).encode()
+                req = _u.Request(p["base_url"].rstrip("/") + "/chat/completions", data=body,
+                                 headers={"Content-Type": "application/json",
+                                          "Authorization": f"Bearer {p.get('key', '')}"})
+                with _u.urlopen(req, timeout=60) as r:
+                    json.loads(r.read())
+                check(f"profile [{name}] endpoint reachable", True, "")
+            except Exception as e:
+                check(f"profile [{name}] endpoint reachable", False, str(e)[:120])
+
+
 def cmd_run(a: argparse.Namespace) -> None:
     v = load_variant(a.variant)
     llm = LLM()
@@ -215,7 +295,7 @@ def cmd_run(a: argparse.Namespace) -> None:
             continue
 
         if rnd < a.rounds - 1:
-            feedback = llm.critique(v.system_prompt(), a.prompt, str(png))
+            feedback = llm.vision().critique(v.system_prompt(), a.prompt, str(png))
         history.append({"round": rnd, "result": "ok", "coverage": g["coverage"]})
 
     scored = []
@@ -276,6 +356,10 @@ def main() -> None:
     sm.add_argument("--name", default=None, help="optional; auto-named from source path")
     sm.set_defaults(fn=cmd_stamp)
 
+    d = sub.add_parser("doctor", help="readiness check (--ping <profile> to live-test)")
+    d.add_argument("--ping", default="", help="profile name to live-ping, or 'all'")
+    d.set_defaults(fn=cmd_doctor)
+
 
     gt = sub.add_parser("gate")
     gt.add_argument("--sketch", type=Path, required=True)
@@ -295,6 +379,8 @@ def main() -> None:
     b.add_argument("--max-attempts", type=int, default=3)
     b.add_argument("--out-prefix", type=Path, default=None,
                    help="default: gallery/pool/<variant>/")
+    b.add_argument("--limit", type=int, default=0,
+                   help="only the first N prompts (0 = all)")
     b.set_defaults(fn=cmd_batch)
 
 

@@ -1,0 +1,36 @@
+# think-paint provider profiles — the ONLY file most users need to touch.
+#
+# Pick the providers you have, fill in the key (inline `key = "..."` or point
+# at an environment variable with `key_env`), and reference the profile by
+# name from variants/<name>/generators.toml or THINKPAINT_PROVIDER=<name>.
+# Any explicit THINKPAINT_* environment variable overrides the profile.
+
+[zai]
+base_url = "https://api.z.ai/api/coding/paas/v4"   # GLM Coding Plan endpoint
+key_env = "ZAI_API_KEY"
+model = "glm-5.3-flash"
+vision_model = "glm-5.3-flash"                      # can see images
+
+[openai]
+base_url = "https://api.openai.com/v1"
+key_env = "OPENAI_API_KEY"
+model = "gpt-5.6-luna"
+vision_model = "gpt-5.6-luna"
+
+[openrouter]
+base_url = "https://openrouter.ai/api/v1"
+key_env = "OPENROUTER_API_KEY"
+model = "qwen/qwen3-coder-next"
+vision_model = "google/gemma-4-31b-it"              # judge must accept images
+
+[ollama]
+base_url = "http://localhost:11434/v1"
+key = "ollama"                                      # local: any non-empty string
+model = "qwen2.5-coder:3b"
+vision_model = "llava:13b"                          # any local vision model
+
+[anthropic]
+base_url = "https://api.anthropic.com/v1"           # OpenAI-compat bridge required
+key_env = "ANTHROPIC_API_KEY"
+model = "claude-sonnet-4-5"
+vision_model = "claude-sonnet-4-5"
